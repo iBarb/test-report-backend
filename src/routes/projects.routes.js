@@ -6,6 +6,7 @@ const auth = require("../middleware/auth");
 const { fn, col, Sequelize } = require("sequelize");
 const UploadedFile = require("../models/UploadedFile");
 const sequelize = require("../config/db");
+const User = require("../models/User");
 
 const router = express.Router();
 
@@ -140,6 +141,55 @@ router.post("/:id/users", auth, async (req, res) => {
 
         res.json(pu);
     } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Listar usuarios asignados a un proyecto (dueño primero)
+router.get("/:id/users", auth, async (req, res) => {
+    try {
+        const projectId = req.params.id;
+
+        // 1️⃣ Obtener asignaciones activas (si quieres incluir eliminadas, quita el filtro)
+        const projectUsers = await ProjectUser.findAll({
+            where: {
+                project_id: projectId,
+                is_deleted: false,
+            },
+            raw: true,
+        });
+
+        // 2️⃣ Si no hay usuarios asignados
+        if (projectUsers.length === 0) {
+            return res.json([]);
+        }
+
+        // 3️⃣ Extraer IDs únicos de usuario
+        const userIds = [...new Set(projectUsers.map(pu => pu.user_id))];
+
+        // 4️⃣ Buscar usuarios activos y no eliminados
+        const users = await User.findAll({
+            where: {
+                user_id: userIds,
+                is_deleted: false,
+            },
+            attributes: ["user_id", "full_name", "email", "status"],
+            raw: true,
+        });
+
+        // 5️⃣ Crear un mapa para acceso O(1)
+        const userMap = Object.fromEntries(users.map(u => [u.user_id, u]));
+
+        // 6️⃣ Combinar datos manualmente
+        const result = projectUsers.map(pu => ({
+            ...pu,
+            user: userMap[pu.user_id] || null,
+        }));
+
+        // 7️⃣ Enviar respuesta
+        res.json(result);
+    } catch (err) {
+        console.error(err);
         res.status(500).json({ error: err.message });
     }
 });

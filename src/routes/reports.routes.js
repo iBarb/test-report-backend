@@ -162,12 +162,12 @@ router.get("/project/:project_id", auth, async (req, res) => {
     try {
         const reports = await Report.findAll({
             where: { is_deleted: false },
-            include: [
-                {
-                    model: UploadedFile,
-                    where: { project_id: req.params.project_id },
-                },
-            ],
+            // include: [
+            //     {
+            //         model: UploadedFile,
+            //         where: { project_id: req.params.project_id },
+            //     },
+            // ],
         });
         res.json(reports);
     } catch (error) {

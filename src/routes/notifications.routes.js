@@ -8,7 +8,7 @@ const router = express.Router();
 // Listar notificaciones del usuario
 router.get("/", auth, async (req, res) => {
     const notes = await Notification.findAll({
-        where: { user_id: req.user.id, is_deleted: false },
+        where: { user_id: req.user.user_id, is_deleted: false },
     });
     res.json(notes);
 });
@@ -21,7 +21,7 @@ router.put("/:id/read", auth, async (req, res) => {
     const oldValue = note.toJSON();
     await note.update({ status: "leído" });
 
-    await audit("Notification", "UPDATE", oldValue, note.toJSON(), req.user.id);
+    await audit("Notification", "UPDATE", oldValue, note.toJSON(), req.user.user_id);
 
     res.json(note);
 });
