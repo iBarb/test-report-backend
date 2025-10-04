@@ -6,7 +6,7 @@ module.exports = async (req, res, next) => {
         // Obtener el token desde los headers
         const token = req.headers["authorization"]?.split(" ")[1];
         if (!token) {
-            return res.status(401).json({ error: "No token provided" });
+            return res.status(401).json({ error: "Token no encontrado" });
         }
 
         // Verificar token
@@ -20,12 +20,12 @@ module.exports = async (req, res, next) => {
 
         // Validar existencia
         if (!user) {
-            return res.status(403).json({ error: "User not found" });
+            return res.status(403).json({ error: "Usuario no encontrado" });
         }
 
         // Verificar si el usuario está eliminado o inactivo
         if (user.is_deleted || user.status === false) {
-            return res.status(403).json({ error: "User is inactive or deleted" });
+            return res.status(403).json({ error: "Usuario inactivo o eliminado" });
         }
 
         // Guardar info del usuario en la request
@@ -36,8 +36,8 @@ module.exports = async (req, res, next) => {
     } catch (err) {
         console.error(err);
         if (err.name === "TokenExpiredError") {
-            return res.status(401).json({ error: "Token expired" });
+            return res.status(401).json({ error: "Token expirado" });
         }
-        return res.status(403).json({ error: "Invalid token" });
+        return res.status(403).json({ error: "Token inválido" });
     }
 };
