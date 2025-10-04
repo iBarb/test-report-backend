@@ -1,0 +1,20 @@
+{
+    "watch": [
+        "*.js",
+        "routes/**/*.js",
+        "models/**/*.js",
+        "middleware/**/*.js"
+    ],
+    "ignore": [
+        "uploads/**",
+        "*.db",
+        "*.sqlite",
+        "*.sqlite3",
+        "node_modules/**",
+        ".git/**"
+    ],
+    "ext": "js,json",
+    "execMap": {
+        "js": "node --max-old-space-size=2048 --expose-gc"
+    }
+}
