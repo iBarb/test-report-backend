@@ -114,12 +114,12 @@ router.post("/login", async (req, res) => {
 
     const user = await User.findOne({ where: { email, is_deleted: false } });
     if (!user) {
-      return res.status(401).json({ status: "error", message: "Credenciales inválidas" });
+      return res.status(401).json({ status: "error", message: "Correo o contraseña incorrectos" });
     }
 
     const match = await bcrypt.compare(password, user.password_hash);
     if (!match) {
-      return res.status(401).json({ status: "error", message: "Credenciales inválidas" });
+      return res.status(401).json({ status: "error", message: "Correo o contraseña incorrectos" });
     }
 
     const token = generateToken(user);

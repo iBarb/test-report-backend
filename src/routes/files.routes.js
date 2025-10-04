@@ -35,13 +35,13 @@ router.post("/upload/:project_id", auth, upload.single("file"), async (req, res)
 
         const file = await UploadedFile.create({
             project_id,
-            user_id: req.user.id,
+            user_id: req.user.user_id,
             file_name: req.file.originalname,
             file_type: req.file.mimetype,
             storage_path: req.file.path,
         });
 
-        await audit("UploadedFile", "CREATE", null, file.toJSON(), req.user.id);
+        await audit("UploadedFile", "CREATE", null, file.toJSON(), req.user.user_id);
 
         res.json({
             message: "Archivo subido correctamente",

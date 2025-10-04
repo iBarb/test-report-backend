@@ -5,16 +5,50 @@ const audit = require("../middleware/audit");
 const auth = require("../middleware/auth");
 const { fn, col, Sequelize } = require("sequelize");
 const UploadedFile = require("../models/UploadedFile");
+const sequelize = require("../config/db");
 
 const router = express.Router();
 
 // Crear proyecto
 router.post("/", auth, async (req, res) => {
+    const transaction = await sequelize.transaction();
     try {
-        const project = await Project.create(req.body);
-        await audit("Project", "CREATE", null, project.toJSON(), req.user.id);
+        const { name, description, start_date, end_date, status } = req.body;
+
+        // 1️⃣ Crear el proyecto
+        const project = await Project.create(
+            {
+                name,
+                description,
+                start_date,
+                end_date,
+                status,
+                is_deleted: false,
+            },
+            { transaction }
+        );
+
+        // 2️⃣ Registrar también al usuario actual en ProjectUser
+        await ProjectUser.create(
+            {
+                project_id: project.project_id,
+                user_id: req.user.user_id,
+                permissions: "admin",
+                status: "activo",
+                is_deleted: false,
+            },
+            { transaction }
+        );
+
+        // 3️⃣ Registrar auditoría
+        await audit("Project", "CREATE", null, project.toJSON(), req.user.user_id, transaction);
+
+        // 4️⃣ Confirmar todo
+        await transaction.commit();
+
         res.json(project);
     } catch (err) {
+        await transaction.rollback();
         res.status(500).json({ error: err.message });
     }
 });
@@ -26,6 +60,7 @@ router.get("/", auth, async (req, res) => {
             where: { is_deleted: false },
             attributes: {
                 include: [
+                    // Conteo de reportes
                     [
                         Sequelize.literal(`(
                             SELECT COUNT(*)
@@ -33,7 +68,17 @@ router.get("/", auth, async (req, res) => {
                             WHERE uf.project_id = "Project".project_id
                             AND uf.is_deleted = false
                         )`),
-                        "report_count"
+                        "reports_count"
+                    ],
+                    // Conteo de usuarios
+                    [
+                        Sequelize.literal(`(
+                            SELECT COUNT(*)
+                            FROM "ProjectUser" AS pu
+                            WHERE pu.project_id = "Project".project_id
+                            AND pu.is_deleted = false
+                        )`),
+                        "members_count"
                     ]
                 ]
             }
@@ -63,7 +108,7 @@ router.put("/:id", auth, async (req, res) => {
 
     const oldValue = project.toJSON();
     await project.update(req.body);
-    await audit("Project", "UPDATE", oldValue, project.toJSON(), req.user.id);
+    await audit("Project", "UPDATE", oldValue, project.toJSON(), req.user.user_id);
 
     res.json(project);
 });
@@ -74,7 +119,7 @@ router.delete("/:id", auth, async (req, res) => {
     if (!project) return res.status(404).json({ error: "No encontrado" });
 
     await project.update({ is_deleted: true });
-    await audit("Project", "DELETE", project.toJSON(), null, req.user.id);
+    await audit("Project", "DELETE", project.toJSON(), null, req.user.user_id);
 
     res.json({ success: true });
 });
@@ -91,7 +136,7 @@ router.post("/:id/users", auth, async (req, res) => {
             status,
         });
 
-        await audit("ProjectUser", "CREATE", null, pu.toJSON(), req.user.id);
+        await audit("ProjectUser", "CREATE", null, pu.toJSON(), req.user.user_id);
 
         res.json(pu);
     } catch (err) {

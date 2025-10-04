@@ -5,7 +5,6 @@ const ProjectUser = sequelize.define("ProjectUser", {
     project_user_id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
     project_id: { type: DataTypes.INTEGER, allowNull: false },
     user_id: { type: DataTypes.INTEGER, allowNull: false },
-    role_id: { type: DataTypes.INTEGER, allowNull: false },
     permissions: { type: DataTypes.STRING(255) },
     status: { type: DataTypes.STRING(50) }, // activo, invitado, eliminado
     is_deleted: { type: DataTypes.BOOLEAN, defaultValue: false },

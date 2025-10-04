@@ -117,7 +117,7 @@ router.post("/generate", auth, async (req, res) => {
         // Crear Report base
         const report = await Report.create({
             file_id: file.file_id,
-            generated_by: req.user.id,
+            generated_by: req.user.user_id,
             title: title || `Reporte generado ${new Date().toISOString()}`,
             content: "",
             status: "draft",
@@ -142,11 +142,11 @@ router.post("/generate", auth, async (req, res) => {
             version: 1,
             prompt: prompt || null,
             content: processed.content,
-            created_by: req.user.id,
+            created_by: req.user.user_id,
         });
 
         await report.update({ content: processed.content });
-        await audit("Report", "CREATE", null, report.toJSON(), req.user.id);
+        await audit("Report", "CREATE", null, report.toJSON(), req.user.user_id);
 
         res.json({ message: "Reporte generado", report, history });
     } catch (error) {
@@ -243,7 +243,7 @@ router.put("/:report_id", auth, async (req, res) => {
             version: newVersion,
             prompt: prompt || null,
             content: processed.content,
-            created_by: req.user.id,
+            created_by: req.user.user_id,
         });
 
         await report.update({
