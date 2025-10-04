@@ -3,6 +3,8 @@ const Project = require("../models/Project");
 const ProjectUser = require("../models/ProjectUser");
 const audit = require("../middleware/audit");
 const auth = require("../middleware/auth");
+const { fn, col, Sequelize } = require("sequelize");
+const UploadedFile = require("../models/UploadedFile");
 
 const router = express.Router();
 
@@ -19,8 +21,30 @@ router.post("/", auth, async (req, res) => {
 
 // Listar proyectos
 router.get("/", auth, async (req, res) => {
-    const projects = await Project.findAll({ where: { is_deleted: false } });
-    res.json(projects);
+    try {
+        const projects = await Project.findAll({
+            where: { is_deleted: false },
+            attributes: {
+                include: [
+                    [
+                        Sequelize.literal(`(
+                            SELECT COUNT(*)
+                            FROM "UploadedFile" AS uf
+                            WHERE uf.project_id = "Project".project_id
+                            AND uf.is_deleted = false
+                        )`),
+                        "report_count"
+                    ]
+                ]
+            }
+        });
+
+
+        res.json(projects);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: "Error al listar proyectos" });
+    }
 });
 
 // Ver proyecto
