@@ -7,30 +7,30 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 const UploadedFile = require("../models/UploadedFile");
 const Report = require("../models/Report");
 const ReportHistory = require("../models/ReportHistory");
+const NotificationService = require("../services/notificationService");
 
 const auth = require("../middleware/auth");
 const audit = require("../middleware/audit");
+const { Sequelize } = require("sequelize");
 
 const router = express.Router();
 
-// 📌 Configuración de Gemini
+// Configuración de Gemini
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-
-// 🔥 Usar modelo más ligero y eficiente
 const model = genAI.getGenerativeModel({
-    model: "gemini-2.5-pro",
+    model: "gemini-2.5-flash-lite",
     generationConfig: {
         temperature: 0.4,
     }
 });
 
-// 🔹 Función auxiliar: validar formato de archivo
+// Función auxiliar: validar formato de archivo
 const isValidFormat = (filename) => {
     const allowedExtensions = [".xml", ".json", ".html", ".csv", ".txt", ".log"];
     return allowedExtensions.includes(path.extname(filename).toLowerCase());
 };
 
-// 🔹 Función auxiliar: procesar respuesta de Gemini
+// Función auxiliar: procesar respuesta de Gemini
 const processGeminiResponse = (text) => {
     if (text.includes("[ERROR]")) {
         const cleanText = text.replace(/\[ERROR\].*/i, "").trim();
@@ -39,48 +39,39 @@ const processGeminiResponse = (text) => {
     return { isError: false, content: text };
 };
 
-// 🔥 1. CREAR CARPETA SI NO EXISTE
+// Crear carpeta de uploads
 const uploadDir = path.join(__dirname, "../uploads");
-
 if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, { recursive: true });
-    console.log("✅ Carpeta 'uploads' creada");
 }
 
-// 🔥 2. CONFIGURAR MULTER
+// Configurar Multer
 const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        cb(null, uploadDir);
-    },
+    destination: (req, file, cb) => cb(null, uploadDir),
     filename: (req, file, cb) => {
         const uniqueName = `${Date.now()}-${file.originalname}`;
         cb(null, uniqueName);
     }
 });
 
-// 🔥 3. FILTRO DE ARCHIVOS (¡ESTO FALTABA!)
 const fileFilter = (req, file, cb) => {
     const allowedExtensions = [".xml", ".json", ".html", ".csv", ".txt", ".log"];
     const ext = path.extname(file.originalname).toLowerCase();
-
     if (allowedExtensions.includes(ext)) {
-        cb(null, true); // Aceptar
+        cb(null, true);
     } else {
-        cb(new Error(`Formato no permitido: ${ext}`), false); // Rechazar
+        cb(new Error(`Formato no permitido: ${ext}`), false);
     }
 };
 
-// 🔥 4. INICIALIZAR MULTER
 const upload = multer({
     storage: storage,
-    fileFilter: fileFilter, // ✅ Ahora sí existe
-    limits: {
-        fileSize: 10 * 1024 * 1024 // 10 MB
-    }
+    fileFilter: fileFilter,
+    limits: { fileSize: 10 * 1024 * 1024 }
 });
 
-// 🔹 Prompt base (OPTIMIZADO - más corto)
-const buildPrompt = (fileContent, userPrompt = "") => `
+// Prompt base
+const buildPrompt = (fileContent, userPrompt = "", UserName = "") => `
     Eres un asistente experto en pruebas de software y en la norma ISO/IEC/IEEE 29119-3. Tu tarea es procesar un archivo de resultados de pruebas:
     ${fileContent}
 
@@ -94,7 +85,13 @@ const buildPrompt = (fileContent, userPrompt = "") => `
     Extrae los datos relevantes y genera únicamente la información siguiendo los formatos de ISO/IEC/IEEE 29119-3.
     El TEL debe ser uno u contener todas las ejecuciones de prueba. El TIR debe ser uno para cada ejecucion fallida.
 
-    Solo retorna Formato de salida sin nada mas, sin formatear. agrega todos los [TIR] que sean necesarios.
+    -El usuario que revisa el informe es "${UserName}"
+    -El archivo es preparado por "QA Automation System"
+    -El informe es de ${fileContent}
+    -La introduccion debe tener al menos 100 a 250 palabras
+    -Los codigoos de TIR deben ser INC-001, INC-002, INC-003, etc.
+
+    Solo retorna Formato de salida sin nada mas, sin formatear. agrega todos los testIncidentReports que sean necesarios.
 
     Formato de salida:
 
@@ -111,43 +108,43 @@ const buildPrompt = (fileContent, userPrompt = "") => `
     "documentRevisionHistory": [
         { "date": "", "documentVersion": "", "revisionDescription": "", "author": "" }
     ],
-    "introduction": "Breve definición de Test Execution Log según ISO/IEC/IEEE 29119-3: documento que registra la ejecución de casos de prueba, incluyendo resultados, defectos y observaciones.",
+    "introduction": "",
     "testExecutionLog": [
-        { "testCaseId": "", "testCaseDescription": "", "status": "", "executionStart": "", "executionEnd": "", "durationMs": , "tester": "", "defectId": , "comments": "" }
+        { "testCaseId": "", "testCaseDescription": "", "status": "Passed|Failed|Blocked|Skipped", "executionStart": "", "executionEnd": "", "durationMs": , "tester": "", "defectId": , "comments": "" }
     ]
     }
 
     [TIR]
     {
-    "documentApprovalHistory": { "preparedBy": "", "Reviewed By": "", "Approved By": "" },
+    "documentApprovalHistory": { "preparedBy": "", "Reviewed By": "",, "Approved By": "" },
     "documentRevisionHistory": [
         { "date": "", "documentVersion": "", "revisionDescription": "", "author": "" }
     ],
-    "introduction": "Plantilla de Informe de Incidente de Prueba (Test Incident Report) para registrar incidentes durante los diferentes niveles de prueba según ISO/IEC/IEEE 29119-3.",
+    "introduction": "",
     "testIncidentReports": [
         {
-        "generalInformation": {
-            "projectName": "",
-            "testLevel": "Unitario|Integración|Sistema|Rendimiento|Aceptación|Otro",
-            "incidentDate": "",
-            "incidentNumber": "",
-            "testCaseId": "",
-            "application": "",
-            "buildVersion": ""
-        },
-        "incidentDetails": {
-            "dateTime": "",
-            "originatorAndTitle": "",
-            "environmentInformation": "",
-            "incidentDescription": "",
-            "expectedResults": "",
-            "actualResults": "",
-            "variance": "",
-            "severity": "Alto|Medio|Bajo",
-            "priority": "Alto|Medio|Bajo",
-            "risk": "",
-            "incidentStatus": "Abierto|Aprobado para resolución|Corregido|Reevaluado y confirmado|Cerrado|Rechazado|Retirado"
-        }
+            "generalInformation": {
+                "projectName": "",
+                "testLevel": "Unit|Integration|System|Performance|Acceptance|Other",
+                "incidentDate": "",
+                "incidentNumber": "",
+                "testCaseId": "",
+                "application": "",
+                "buildVersion": ""
+            },
+            "incidentDetails": {
+                "dateTime": "",
+                "originatorAndTitle": "",
+                "environmentInformation": "",
+                "incidentDescription": "",
+                "expectedResults": "",
+                "actualResults": "",
+                "variance": "",
+                "severity": "Alto|Medio|Bajo",
+                "priority": "Alto|Medio|Bajo",
+                "risk": "",
+                "incidentStatus": "Abierto|Aprobado para resolución|Corregido|Reevaluado y confirmado|Cerrado|Rechazado|Retirado"
+            }
         }
     ]
     }
@@ -156,7 +153,7 @@ const buildPrompt = (fileContent, userPrompt = "") => `
     ${userPrompt || "Genera un reporte técnico estándar"}
     `;
 
-// 🔥 GENERACIÓN CON STREAMING Y MANEJO DE ERRORES ROBUSTO
+// Generación con streaming
 const generateGeminiResponse = async (prompt) => {
     const maxRetries = 2;
     let attempt = 0;
@@ -173,7 +170,6 @@ const generateGeminiResponse = async (prompt) => {
                 const chunkText = chunk.text();
                 fullText += chunkText;
 
-                // 🔥 LÍMITE de seguridad para evitar memoria infinita
                 if (fullText.length > 1000000) {
                     console.warn("⚠️ Respuesta muy larga, truncando...");
                     break;
@@ -194,14 +190,15 @@ const generateGeminiResponse = async (prompt) => {
                 throw new Error(`Falló después de ${maxRetries} intentos: ${error.message}`);
             }
 
-            // Esperar antes de reintentar
             await new Promise(resolve => setTimeout(resolve, 2000));
         }
     }
 };
 
-// 🔥 FUNCIÓN DE PROCESAMIENTO EN BACKGROUND
-const processReportInBackground = async (reportId, fileContent, prompt, userId) => {
+// 🔥 PROCESAMIENTO EN BACKGROUND CON NOTIFICACIONES
+const processReportInBackground = async (reportId, fileContent, prompt, userId, title, full_name) => {
+    const startTime = Date.now();
+
     try {
         console.log(`🚀 Procesando reporte ${reportId} en background...`);
 
@@ -211,18 +208,27 @@ const processReportInBackground = async (reportId, fileContent, prompt, userId) 
             return;
         }
 
+        // Notificar inicio
         await report.update({ status: "En progreso" });
+        await NotificationService.reportInProgress(userId, reportId, title);
 
-        const fullPrompt = buildPrompt(fileContent, prompt);
+        const fullPrompt = buildPrompt(fileContent, prompt, full_name);
         const geminiText = await generateGeminiResponse(fullPrompt);
         const processed = processGeminiResponse(geminiText);
-        console.log(`✅ Generación exitosa: ${geminiText.length} caracteres`);
 
         if (processed.isError) {
             await report.update({
-                status: "failed",
+                status: "Fallido",
                 content: processed.content || "Error al procesar archivo"
             });
+
+            // Notificar fallo
+            await NotificationService.reportFailed(
+                userId,
+                reportId,
+                title,
+                processed.content || "Error al procesar archivo"
+            );
             return;
         }
 
@@ -231,14 +237,19 @@ const processReportInBackground = async (reportId, fileContent, prompt, userId) 
             report_id: reportId,
             version: 1,
             prompt: prompt || null,
+            duration: Date.now() - startTime,
             content: processed.content,
             created_by: userId,
         });
 
         await report.update({
             content: processed.content,
-            status: "Completado"
+            status: "Completado",
+            duration: Date.now() - startTime
         });
+
+        // Notificar éxito
+        await NotificationService.reportCompleted(userId, reportId, title);
 
         console.log(`✅ Reporte ${reportId} completado`);
 
@@ -249,9 +260,17 @@ const processReportInBackground = async (reportId, fileContent, prompt, userId) 
             const report = await Report.findByPk(reportId);
             if (report) {
                 await report.update({
-                    status: "failed",
+                    status: "Fallido",
                     content: `Error: ${error.message}`
                 });
+
+                // Notificar error
+                await NotificationService.reportFailed(
+                    userId,
+                    reportId,
+                    title,
+                    error.message
+                );
             }
         } catch (updateError) {
             console.error("Error actualizando estado fallido:", updateError);
@@ -260,7 +279,7 @@ const processReportInBackground = async (reportId, fileContent, prompt, userId) 
 };
 
 /**
- * 📌 1. Generar Report (RESPUESTA INMEDIATA + PROCESAMIENTO ASYNC)
+ * 1. Generar Report (RESPUESTA INMEDIATA + PROCESAMIENTO ASYNC)
  */
 router.post("/upload/:project_id", auth, upload.single("file"), async (req, res) => {
     try {
@@ -271,7 +290,7 @@ router.post("/upload/:project_id", auth, upload.single("file"), async (req, res)
             return res.status(400).json({ error: "No se proporcionó archivo" });
         }
 
-        // 1️⃣ Guardar archivo
+        // Guardar archivo
         const file = await UploadedFile.create({
             project_id,
             user_id: req.user.user_id,
@@ -282,7 +301,7 @@ router.post("/upload/:project_id", auth, upload.single("file"), async (req, res)
 
         await audit("UploadedFile", "CREATE", null, file.toJSON(), req.user.user_id);
 
-        // 2️⃣ Validar formato
+        // Validar formato
         if (!isValidFormat(file.file_name)) {
             return res.status(400).json({
                 message: `Formato no permitido: ${file.file_name}`,
@@ -290,32 +309,40 @@ router.post("/upload/:project_id", auth, upload.single("file"), async (req, res)
             });
         }
 
-        // 3️⃣ Leer contenido
+        // Leer contenido
         const fileContent = fs.readFileSync(file.storage_path, "utf-8");
 
-        // 4️⃣ Crear reporte con estado "En progreso"
+        // Crear reporte
+        const reportTitle = title || `Reporte ${new Date().toISOString().split('T')[0]}`;
         const report = await Report.create({
             file_id: file.file_id,
             generated_by: req.user.user_id,
-            title: title || `Reporte ${new Date().toISOString().split('T')[0]}`,
+            title: reportTitle,
             prompt: prompt || null,
             content: "",
-            status: "En progreso",
+            status: "Pendiente",
         });
 
         await audit("Report", "CREATE", null, report.toJSON(), req.user.user_id);
 
-        // 🔥 5️⃣ PROCESAR EN BACKGROUND (no esperar respuesta)
+        // Buscar información completa del usuario
+        const User = require("../models/User");
+        const user = await User.findByPk(req.user.user_id);
+        const fullName = user?.full_name || "Usuario Desconocido";
+
+        // Procesar en background
         setImmediate(() => {
             processReportInBackground(
                 report.report_id,
                 fileContent,
                 prompt,
-                req.user.user_id
+                req.user.user_id,
+                reportTitle,
+                fullName
             );
         });
 
-        // ✅ RESPUESTA INMEDIATA al cliente
+        // Respuesta inmediata
         res.status(202).json({
             message: "Archivo subido. El reporte se está generando en segundo plano.",
             file: {
@@ -326,9 +353,9 @@ router.post("/upload/:project_id", auth, upload.single("file"), async (req, res)
             report: {
                 report_id: report.report_id,
                 title: report.title,
-                status: "En progreso"
+                status: "Pendiente"
             },
-            pollUrl: `/api/reports/${report.report_id}` // URL para verificar estado
+            pollUrl: `/reports/${report.report_id}`
         });
 
     } catch (error) {
@@ -341,15 +368,57 @@ router.post("/upload/:project_id", auth, upload.single("file"), async (req, res)
 });
 
 /**
- * 📌 2. Listar reportes de un proyecto
+ * 2. Listar reportes de un proyecto
  */
 router.get("/project/:project_id", auth, async (req, res) => {
+    const projectId = req.params.project_id;
     try {
-        const reports = await Report.findAll({
-            where: { is_deleted: false },
-            order: [["created_at", "DESC"]]
+        const reports = await UploadedFile.findAll({
+            where: {
+                is_deleted: false,
+                project_id: projectId,
+                [Sequelize.Op.and]: Sequelize.literal(`
+                    EXISTS (
+                        SELECT 1
+                        FROM "Project" AS p
+                        WHERE p.project_id = "UploadedFile".project_id
+                        AND p.is_deleted = false
+                    )
+                `)
+            },
+            attributes: {
+                include: [
+                    [
+                        Sequelize.literal(`(
+                            SELECT json_build_object(
+                                'report_id', r.report_id,
+                                'file_id', r.file_id,
+                                'generated_by', r.generated_by,
+                                'title', r.title,
+                                'content', r.content,
+                                'prompt', r.prompt,
+                                'status', r.status,
+                                'is_deleted', r.is_deleted,
+                                'duration', r.duration,
+                                'created_at', r.created_at,
+                                'updated_at', r.updated_at
+                            )
+                            FROM "Report" AS r
+                            WHERE r.file_id = "UploadedFile".file_id
+                            AND r.is_deleted = false
+                        )`),
+                        'report'
+                    ]
+                ]
+            },
+            order: [["uploaded_at", "DESC"]],
         });
-        res.json(reports);
+
+        const onlyReports = reports
+            .map(file => file.dataValues.report)
+            .filter(report => report !== null);
+
+        res.json(onlyReports);
     } catch (error) {
         console.error(error);
         res.status(500).json({ error: "Error al listar reportes" });
@@ -357,7 +426,7 @@ router.get("/project/:project_id", auth, async (req, res) => {
 });
 
 /**
- * 📌 3. Ver detalle de un reporte (CON ESTADO)
+ * 3. Ver detalle de un reporte
  */
 router.get("/:report_id", auth, async (req, res) => {
     try {
@@ -379,7 +448,7 @@ router.get("/:report_id", auth, async (req, res) => {
 });
 
 /**
- * 📌 4. Editar reporte (TAMBIÉN ASYNC)
+ * 4. Editar reporte
  */
 router.put("/:report_id", auth, async (req, res) => {
     try {
@@ -411,9 +480,10 @@ router.put("/:report_id", auth, async (req, res) => {
             fileContent = fs.readFileSync(file.storage_path, "utf-8");
         }
 
+        const reportTitle = title || report.title;
         await report.update({
-            status: "En progreso",
-            title: title || report.title
+            status: "Pendiente",
+            title: reportTitle
         });
 
         // Calcular nueva versión
@@ -423,10 +493,17 @@ router.put("/:report_id", auth, async (req, res) => {
         });
         const newVersion = (lastHistory?.version || 0) + 1;
 
-        // 🔥 PROCESAR EN BACKGROUND
+        // Procesar en background
         setImmediate(async () => {
             try {
-                const fullPrompt = buildPrompt(fileContent, prompt);
+                await report.update({ status: "En progreso" });
+                await NotificationService.reportInProgress(
+                    req.user.user_id,
+                    report.report_id,
+                    reportTitle
+                );
+
+                const fullPrompt = buildPrompt(fileContent, prompt, req.user.full_name);
                 const geminiText = await generateGeminiResponse(fullPrompt);
                 const processed = processGeminiResponse(geminiText);
 
@@ -443,19 +520,37 @@ router.put("/:report_id", auth, async (req, res) => {
                         content: processed.content,
                         status: "Completado"
                     });
+
+                    await NotificationService.reportCompleted(
+                        req.user.user_id,
+                        report.report_id,
+                        reportTitle
+                    );
                 } else {
-                    await report.update({ status: "failed" });
+                    await report.update({ status: "Fallido" });
+                    await NotificationService.reportFailed(
+                        req.user.user_id,
+                        report.report_id,
+                        reportTitle,
+                        processed.content
+                    );
                 }
             } catch (error) {
                 console.error("Error en regeneración:", error);
-                await report.update({ status: "failed" });
+                await report.update({ status: "Fallido" });
+                await NotificationService.reportFailed(
+                    req.user.user_id,
+                    report.report_id,
+                    reportTitle,
+                    error.message
+                );
             }
         });
 
         res.status(202).json({
             message: "Regeneración iniciada",
             report: report.toJSON(),
-            pollUrl: `/api/reports/${report.report_id}`
+            pollUrl: `/reports/${report.report_id}`
         });
 
     } catch (error) {
@@ -465,7 +560,7 @@ router.put("/:report_id", auth, async (req, res) => {
 });
 
 /**
- * 📌 5. Listar historial
+ * 5. Listar historial
  */
 router.get("/:report_id/history", auth, async (req, res) => {
     try {

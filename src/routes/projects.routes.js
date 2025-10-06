@@ -3,7 +3,7 @@ const Project = require("../models/Project");
 const ProjectUser = require("../models/ProjectUser");
 const audit = require("../middleware/audit");
 const auth = require("../middleware/auth");
-const { fn, col, Sequelize } = require("sequelize");
+const { fn, col, Sequelize, Op } = require("sequelize");
 const UploadedFile = require("../models/UploadedFile");
 const sequelize = require("../config/db");
 const User = require("../models/User");
@@ -54,14 +54,27 @@ router.post("/", auth, async (req, res) => {
     }
 });
 
-// Listar proyectos
+// Listar proyectos del usuario
 router.get("/", auth, async (req, res) => {
     try {
+        const userId = req.user.dataValues.user_id
+
         const projects = await Project.findAll({
-            where: { is_deleted: false },
+            where: {
+                is_deleted: false,
+                // Solo proyectos donde el usuario tiene permisos
+                [Sequelize.Op.and]: Sequelize.literal(`
+                    EXISTS (
+                        SELECT 1
+                        FROM "ProjectUser" AS pu
+                        WHERE pu.project_id = "Project".project_id
+                        AND pu.user_id = ${userId}
+                        AND pu.is_deleted = false
+                    )
+                `)
+            },
             attributes: {
                 include: [
-                    // Conteo de reportes
                     [
                         Sequelize.literal(`(
                             SELECT COUNT(*)
@@ -71,7 +84,6 @@ router.get("/", auth, async (req, res) => {
                         )`),
                         "reports_count"
                     ],
-                    // Conteo de usuarios
                     [
                         Sequelize.literal(`(
                             SELECT COUNT(*)
@@ -85,13 +97,13 @@ router.get("/", auth, async (req, res) => {
             }
         });
 
-
         res.json(projects);
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: "Error al listar proyectos" });
     }
 });
+
 
 // Ver proyecto
 router.get("/:id", auth, async (req, res) => {

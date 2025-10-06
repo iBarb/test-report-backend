@@ -7,6 +7,7 @@ const ReportHistory = sequelize.define("ReportHistory", {
     version: { type: DataTypes.INTEGER },
     content: { type: DataTypes.TEXT },
     prompt: { type: DataTypes.TEXT },
+    duration: { type: DataTypes.INTEGER },
     created_at: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
     created_by: { type: DataTypes.INTEGER, allowNull: false },
 }, {

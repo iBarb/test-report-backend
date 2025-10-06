@@ -10,6 +10,7 @@ const Report = sequelize.define("Report", {
     prompt: { type: DataTypes.TEXT },
     status: { type: DataTypes.STRING(50) }, // draft, finalized
     is_deleted: { type: DataTypes.BOOLEAN, defaultValue: false },
+    duration: { type: DataTypes.INTEGER },
     created_at: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
     updated_at: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
 }, {
