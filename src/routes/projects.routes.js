@@ -140,16 +140,69 @@ router.delete("/:id", auth, async (req, res) => {
 // Asignar usuario
 router.post("/:id/users", auth, async (req, res) => {
     try {
-        const { user_id, role_id, permissions, status } = req.body;
-        const pu = await ProjectUser.create({
-            project_id: req.params.id,
-            user_id,
-            role_id,
-            permissions,
-            status,
+        const { email, permissions } = req.body;
+
+        // Validar que el email existe
+        const userExists = await User.findOne({
+            where: { email: email }
         });
 
-        await audit("ProjectUser", "CREATE", null, pu.toJSON(), req.user.user_id);
+        if (!userExists) {
+            return res.status(404).json({
+                error: "El correo no existe"
+            });
+        }
+
+        // Validar que el correo no esté eliminado (soft delete)
+        if (userExists.is_deleted) {
+            return res.status(400).json({
+                error: "El correo ha sido eliminado"
+            });
+        }
+
+        // Validar que el correo esté activo
+        if (!userExists.status) {
+            return res.status(400).json({
+                error: "El correo está inactivo"
+            });
+        }
+
+        // Validar que el usuario no esté asignado a este proyecto
+        const existingProjectUser = await ProjectUser.findOne({
+            where: {
+                project_id: req.params.id,
+                user_id: userExists.user_id
+            }
+        });
+
+        let pu;
+
+        if (existingProjectUser) {
+            // Si el usuario existe pero está eliminado, restaurarlo
+            if (existingProjectUser.is_deleted) {
+                existingProjectUser.is_deleted = false;
+                existingProjectUser.permissions = permissions;
+                await existingProjectUser.save();
+
+                await audit("ProjectUser", "UPDATE", existingProjectUser.toJSON(), existingProjectUser.toJSON(), req.user.user_id);
+
+                pu = existingProjectUser;
+            } else {
+                // Si el usuario existe y NO está eliminado, retornar error
+                return res.status(409).json({
+                    error: "El correo ya está asignado a este proyecto"
+                });
+            }
+        } else {
+            // Si no existe, crear uno nuevo
+            pu = await ProjectUser.create({
+                project_id: req.params.id,
+                user_id: userExists.user_id,
+                permissions,
+            });
+
+            await audit("ProjectUser", "CREATE", null, pu.toJSON(), req.user.user_id);
+        }
 
         res.json(pu);
     } catch (err) {
@@ -202,6 +255,68 @@ router.get("/:id/users", auth, async (req, res) => {
         res.json(result);
     } catch (err) {
         console.error(err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Actualizar permisos de un usuario en el proyecto
+router.put("/:id/users/:userId", auth, async (req, res) => {
+    try {
+        const { permissions } = req.body;
+
+
+        // Buscar la asignación del usuario al proyecto
+        const projectUser = await ProjectUser.findOne({
+            where: {
+                project_id: req.params.id,
+                user_id: req.params.userId,
+                is_deleted: false
+            }
+        });
+
+        // Validar que la asignación existe
+        if (!projectUser) {
+            return res.status(404).json({
+                error: "El usuario no está asignado a este proyecto"
+            });
+        }
+
+        // Actualizar los permisos
+        await projectUser.update({ permissions });
+
+        res.json(projectUser);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Eliminar usuario del proyecto (soft delete)
+router.delete("/:id/users/:userId", auth, async (req, res) => {
+    try {
+        // Buscar la asignación del usuario al proyecto
+        const projectUser = await ProjectUser.findOne({
+            where: {
+                project_id: req.params.id,
+                user_id: req.params.userId,
+                is_deleted: false
+            }
+        });
+
+        // Validar que la asignación existe
+        if (!projectUser) {
+            return res.status(404).json({
+                error: "El usuario no está asignado a este proyecto"
+            });
+        }
+
+        // Soft delete: cambiar is_deleted a true
+        await projectUser.update({ is_deleted: true });
+
+        res.json({
+            message: "Usuario eliminado del proyecto exitosamente",
+            project_user_id: projectUser.project_user_id
+        });
+    } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
