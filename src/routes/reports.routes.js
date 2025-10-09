@@ -430,7 +430,13 @@ router.get("/project/:project_id", auth, async (req, res) => {
  */
 router.get("/:report_id", auth, async (req, res) => {
     try {
-        const report = await Report.findByPk(req.params.report_id);
+        const report = await Report.findOne({
+            where: {
+                id: req.params.report_id,
+                is_deleted: false
+            }
+        });
+
         if (!report) {
             return res.status(404).json({ error: "Reporte no encontrado" });
         }
