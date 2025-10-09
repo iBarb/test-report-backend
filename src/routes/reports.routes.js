@@ -575,4 +575,43 @@ router.get("/:report_id/history", auth, async (req, res) => {
     }
 });
 
+/**
+ * 6. Eliminar reporte (soft delete)
+ */
+router.delete("/:report_id", auth, async (req, res) => {
+    try {
+        const report = await Report.findByPk(req.params.report_id);
+
+        if (!report) {
+            return res.status(404).json({ error: "Reporte no encontrado" });
+        }
+
+        if (report.is_deleted) {
+            return res.status(400).json({ error: "El reporte ya está eliminado" });
+        }
+
+        const oldReport = report.toJSON();
+
+        // Soft delete
+        await report.update({
+            is_deleted: true,
+            updated_at: new Date()
+        });
+
+        await audit("Report", "DELETE", oldReport, report.toJSON(), req.user.user_id);
+
+        res.json({
+            message: "Reporte eliminado exitosamente",
+            report_id: report.report_id
+        });
+
+    } catch (error) {
+        console.error("❌ Error al eliminar reporte:", error);
+        res.status(500).json({
+            error: "Error al eliminar reporte",
+            details: error.message
+        });
+    }
+});
+
 module.exports = router;
