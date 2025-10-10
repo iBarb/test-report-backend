@@ -432,7 +432,7 @@ router.get("/:report_id", auth, async (req, res) => {
     try {
         const report = await Report.findOne({
             where: {
-                id: req.params.report_id,
+                report_id: req.params.report_id,
                 is_deleted: false
             }
         });
