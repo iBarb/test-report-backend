@@ -11,7 +11,9 @@ const NotificationService = require("../services/notificationService");
 
 const auth = require("../middleware/auth");
 const audit = require("../middleware/audit");
-const { Sequelize } = require("sequelize");
+const { Sequelize, QueryTypes } = require("sequelize");
+const User = require("../models/User");
+const sequelize = require("../config/db");
 
 const router = express.Router();
 
@@ -566,18 +568,38 @@ router.put("/:report_id", auth, async (req, res) => {
 });
 
 /**
- * 5. Listar historial
+ * 5. Listar historial de reportes con información de usuarios
  */
 router.get("/:report_id/history", auth, async (req, res) => {
     try {
         const history = await ReportHistory.findAll({
             where: { report_id: req.params.report_id },
             order: [["version", "ASC"]],
+            raw: true,
         });
-        res.json(history);
+
+        const userIds = [...new Set(history.map(h => h.created_by).filter(Boolean))];
+
+        if (userIds.length === 0) {
+            return res.json(history.map(h => ({ ...h, created_by_name: null })));
+        }
+
+        const users = await User.findAll({
+            where: { user_id: userIds },
+            attributes: ["user_id", "full_name"],
+            raw: true,
+        });
+
+        const userMap = new Map(users.map(u => [u.user_id, u.full_name]));
+
+        res.json(history.map(h => ({
+            ...h,
+            created_by: userMap.get(h.created_by) || null
+        })));
+
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: "Error al obtener historial" });
+        console.error("Error al obtener historial:", error);
+        res.status(500).json({ error: "Error al obtener el historial" });
     }
 });
 

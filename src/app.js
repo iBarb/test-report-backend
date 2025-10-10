@@ -33,7 +33,8 @@ app.use("/reports", reportRoutes);
 app.use("/notifications", notificationRoutes);
 
 
-sequelize.sync({ force: true })
+// sequelize.sync({ force: true })
+sequelize.sync({ alter: true })
   .then(() => console.log("✅ Tablas sincronizadas"))
   .catch(err => console.error("❌ Error al sincronizar:", err));
 
