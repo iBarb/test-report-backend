@@ -14,6 +14,7 @@ const audit = require("../middleware/audit");
 const { Sequelize, QueryTypes } = require("sequelize");
 const User = require("../models/User");
 const sequelize = require("../config/db");
+const { buildPrompt } = require("../services/promptService");
 
 const router = express.Router();
 
@@ -71,89 +72,6 @@ const upload = multer({
     fileFilter: fileFilter,
     limits: { fileSize: 10 * 1024 * 1024 }
 });
-
-// Prompt base
-const buildPrompt = (fileContent, userPrompt = "", UserName = "") => `
-    Eres un asistente experto en pruebas de software y en la norma ISO/IEC/IEEE 29119-3. Tu tarea es procesar un archivo de resultados de pruebas:
-    ${fileContent}
-
-    Instrucciones:
-    Verifica que el archivo tenga un formato compatible con herramientas de testing, como XML, JSON, HTML, CSV, TXT o logs.
-
-    Si el formato no es válido, devuelve únicamente:
-    [ERROR] (Indica por qué no se aceptó el archivo)
-
-    Si el Formato es aceptado 
-    Extrae los datos relevantes y genera únicamente la información siguiendo los formatos de ISO/IEC/IEEE 29119-3.
-    El TEL debe ser uno u contener todas las ejecuciones de prueba. El TIR debe ser uno para cada ejecucion fallida.
-
-    -El usuario que revisa el informe es "${UserName}"
-    -El archivo es preparado por "QA Automation System"
-    -El informe es de ${fileContent}
-    -La introduccion debe tener al menos 100 a 250 palabras
-    -Los codigoos de TIR deben ser INC-001, INC-002, INC-003, etc.
-
-    Solo retorna Formato de salida sin nada mas, sin formatear. agrega todos los testIncidentReports que sean necesarios.
-
-    Formato de salida:
-
-    [CONTEO]
-    {
-        Ejecuciones: "", // numero de ejecuciones totales
-        Exitosas: "", // numero de ejecuciones exitosas
-        Fallidas: "", // numero de ejecuciones fallidas
-    }
-
-    [TEL]
-    {
-    "documentApprovalHistory": { "preparedBy": "", "Reviewed By": "", "Approved By": "" },
-    "documentRevisionHistory": [
-        { "date": "", "documentVersion": "", "revisionDescription": "", "author": "" }
-    ],
-    "introduction": "",
-    "testExecutionLog": [
-        { "testCaseId": "", "testCaseDescription": "", "status": "Passed|Failed|Blocked|Skipped", "executionStart": "", "executionEnd": "", "durationMs": , "tester": "", "defectId": , "comments": "" }
-    ]
-    }
-
-    [TIR]
-    {
-    "documentApprovalHistory": { "preparedBy": "", "Reviewed By": "",, "Approved By": "" },
-    "documentRevisionHistory": [
-        { "date": "", "documentVersion": "", "revisionDescription": "", "author": "" }
-    ],
-    "introduction": "",
-    "testIncidentReports": [
-        {
-            "generalInformation": {
-                "projectName": "",
-                "testLevel": "Unit|Integration|System|Performance|Acceptance|Other",
-                "incidentDate": "",
-                "incidentNumber": "",
-                "testCaseId": "",
-                "application": "",
-                "buildVersion": ""
-            },
-            "incidentDetails": {
-                "dateTime": "",
-                "originatorAndTitle": "",
-                "environmentInformation": "",
-                "incidentDescription": "",
-                "expectedResults": "",
-                "actualResults": "",
-                "variance": "",
-                "severity": "Alto|Medio|Bajo",
-                "priority": "Alto|Medio|Bajo",
-                "risk": "",
-                "incidentStatus": "Abierto|Aprobado para resolución|Corregido|Reevaluado y confirmado|Cerrado|Rechazado|Retirado"
-            }
-        }
-    ]
-    }
-
-    Instrucción adicional del usuario:
-    ${userPrompt || "Genera un reporte técnico estándar"}
-    `;
 
 // Generación con streaming
 const generateGeminiResponse = async (prompt) => {
@@ -460,7 +378,7 @@ router.get("/:report_id", auth, async (req, res) => {
  */
 router.put("/:report_id", auth, async (req, res) => {
     try {
-        const { title, status, prompt, file_id } = req.body;
+        const { title, prompt, file_id } = req.body;
         const report = await Report.findByPk(req.params.report_id);
 
         if (!report) {
@@ -469,7 +387,7 @@ router.put("/:report_id", auth, async (req, res) => {
 
         // Caso 1: Solo actualizar título/estado
         if (!prompt && !file_id) {
-            await report.update({ title, status });
+            await report.update({ title });
             return res.json({ message: "Reporte actualizado", report });
         }
 
@@ -488,78 +406,78 @@ router.put("/:report_id", auth, async (req, res) => {
             fileContent = fs.readFileSync(file.storage_path, "utf-8");
         }
 
-        const reportTitle = title || report.title;
-        await report.update({
-            status: "Pendiente",
-            title: reportTitle
-        });
+        // const reportTitle = title || report.title;
+        // await report.update({
+        //     status: "Pendiente",
+        //     title: reportTitle
+        // });
 
-        // Calcular nueva versión
-        const lastHistory = await ReportHistory.findOne({
-            where: { report_id: report.report_id },
-            order: [["version", "DESC"]],
-        });
-        const newVersion = (lastHistory?.version || 0) + 1;
+        // // Calcular nueva versión
+        // const lastHistory = await ReportHistory.findOne({
+        //     where: { report_id: report.report_id },
+        //     order: [["version", "DESC"]],
+        // });
+        // const newVersion = (lastHistory?.version || 0) + 1;
 
-        // Procesar en background
-        setImmediate(async () => {
-            try {
-                await report.update({ status: "En progreso" });
-                await NotificationService.reportInProgress(
-                    req.user.user_id,
-                    report.report_id,
-                    reportTitle
-                );
+        // // Procesar en background
+        // setImmediate(async () => {
+        //     try {
+        //         await report.update({ status: "En progreso" });
+        //         await NotificationService.reportInProgress(
+        //             req.user.user_id,
+        //             report.report_id,
+        //             reportTitle
+        //         );
 
-                const fullPrompt = buildPrompt(fileContent, prompt, req.user.full_name);
-                const geminiText = await generateGeminiResponse(fullPrompt);
-                const processed = processGeminiResponse(geminiText);
+        //         const fullPrompt = buildPrompt(fileContent, prompt, req.user.full_name);
+        //         const geminiText = await generateGeminiResponse(fullPrompt);
+        //         const processed = processGeminiResponse(geminiText);
 
-                if (!processed.isError) {
-                    await ReportHistory.create({
-                        report_id: report.report_id,
-                        version: newVersion,
-                        prompt: prompt || null,
-                        content: processed.content,
-                        created_by: req.user.user_id,
-                    });
+        //         if (!processed.isError) {
+        //             await ReportHistory.create({
+        //                 report_id: report.report_id,
+        //                 version: newVersion,
+        //                 prompt: prompt || null,
+        //                 content: processed.content,
+        //                 created_by: req.user.user_id,
+        //             });
 
-                    await report.update({
-                        content: processed.content,
-                        status: "Completado"
-                    });
+        //             await report.update({
+        //                 content: processed.content,
+        //                 status: "Completado"
+        //             });
 
-                    await NotificationService.reportCompleted(
-                        req.user.user_id,
-                        report.report_id,
-                        reportTitle
-                    );
-                } else {
-                    await report.update({ status: "Fallido" });
-                    await NotificationService.reportFailed(
-                        req.user.user_id,
-                        report.report_id,
-                        reportTitle,
-                        processed.content
-                    );
-                }
-            } catch (error) {
-                console.error("Error en regeneración:", error);
-                await report.update({ status: "Fallido" });
-                await NotificationService.reportFailed(
-                    req.user.user_id,
-                    report.report_id,
-                    reportTitle,
-                    error.message
-                );
-            }
-        });
+        //             await NotificationService.reportCompleted(
+        //                 req.user.user_id,
+        //                 report.report_id,
+        //                 reportTitle
+        //             );
+        //         } else {
+        //             await report.update({ status: "Fallido" });
+        //             await NotificationService.reportFailed(
+        //                 req.user.user_id,
+        //                 report.report_id,
+        //                 reportTitle,
+        //                 processed.content
+        //             );
+        //         }
+        //     } catch (error) {
+        //         console.error("Error en regeneración:", error);
+        //         await report.update({ status: "Fallido" });
+        //         await NotificationService.reportFailed(
+        //             req.user.user_id,
+        //             report.report_id,
+        //             reportTitle,
+        //             error.message
+        //         );
+        //     }
+        // });
 
-        res.status(202).json({
-            message: "Regeneración iniciada",
-            report: report.toJSON(),
-            pollUrl: `/reports/${report.report_id}`
-        });
+        // res.status(202).json({
+        //     message: "Regeneración iniciada",
+        //     report: report.toJSON(),
+        //     pollUrl: `/reports/${report.report_id}`
+        // });
 
     } catch (error) {
         console.error(error);

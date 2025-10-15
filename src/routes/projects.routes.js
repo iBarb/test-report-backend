@@ -78,9 +78,12 @@ router.get("/", auth, async (req, res) => {
                     [
                         Sequelize.literal(`(
                             SELECT COUNT(*)
-                            FROM "UploadedFile" AS uf
+                            FROM "Report" AS r
+                            INNER JOIN "UploadedFile" AS uf 
+                                ON r.file_id = uf.file_id
                             WHERE uf.project_id = "Project".project_id
                             AND uf.is_deleted = false
+                            AND r.is_deleted = false
                         )`),
                         "reports_count"
                     ],
