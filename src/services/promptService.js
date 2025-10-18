@@ -41,6 +41,7 @@ const buildPrompt = (fileContent, userPrompt = "", UserName = "", reportId, titl
     === METADATOS ===
     - Preparado por: "${sanitizedUserName}"
     - el titulo del reporte es: "${sanitizedTitle}"
+    - ReportID: "${reportId}"
     - Introducción: 100-150 palabras mínimo explicando el contexto de las pruebas
 
     === REGLAS DE GENERACIÓN DE REPORTES SEGÚN ISO 29119-3 ===
