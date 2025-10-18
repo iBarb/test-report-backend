@@ -132,7 +132,7 @@ const processReportInBackground = async (reportId, fileContent, prompt, userId, 
         await report.update({ status: "En progreso" });
         await NotificationService.reportInProgress(userId, reportId, title);
 
-        const fullPrompt = buildPrompt(fileContent, prompt, full_name);
+        const fullPrompt = buildPrompt(fileContent, prompt, full_name, reportId, title);
         const geminiText = await generateGeminiResponse(fullPrompt);
         const processed = processGeminiResponse(geminiText);
 
