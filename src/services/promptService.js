@@ -134,6 +134,7 @@ const buildPrompt = (fileContent, userPrompt = "", UserName = "", reportId, titl
         "testIncidentReports": [
             {
                 generalInformation: {
+                    "incidentNumber": "",
                     "title": "",
                     "product": "",
                     "sprint": "",
