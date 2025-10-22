@@ -32,6 +32,7 @@ app.use("/reports", reportRoutes);
 // app.use("/exports", exportRoutes);
 app.use("/notifications", notificationRoutes);
 
+const db = require('./models/associations');
 
 // sequelize.sync({ force: true })
 sequelize.sync({ alter: true })
