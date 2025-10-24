@@ -14,7 +14,7 @@ const audit = require("../middleware/audit");
 const { Sequelize, QueryTypes } = require("sequelize");
 const User = require("../models/User");
 const sequelize = require("../config/db");
-const { buildPrompt } = require("../services/promptService");
+const { buildPrompt, buildVersioningPrompt } = require("../services/promptService");
 
 const router = express.Router();
 
@@ -23,7 +23,7 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({
     model: "gemini-2.5-flash-lite",
     generationConfig: {
-        temperature: 0.4,
+        temperature: 0.7,
     }
 });
 
@@ -33,10 +33,38 @@ const isValidFormat = (filename) => {
     return allowedExtensions.includes(path.extname(filename).toLowerCase());
 };
 
+// Función auxiliar: limpiar markdown de la respuesta
+function cleanMarkdown(response) {
+    // Solo limpiar si hay markdown presente
+    const hasMarkdown = response.includes('```');
+
+    if (hasMarkdown) {
+        // Eliminar backticks y etiquetas json
+        response = response.replace(/```json\n?/g, '');
+        response = response.replace(/```\n?/g, '');
+        response = response.trim();
+    }
+
+    // Asegurar que empieza con [CONTEO] o [ERROR]
+    const conteoIndex = response.indexOf('[CONTEO]');
+    const errorIndex = response.indexOf('[ERROR]');
+
+    if (conteoIndex > 0) {
+        response = response.substring(conteoIndex);
+    } else if (errorIndex > 0) {
+        response = response.substring(errorIndex);
+    }
+
+    return response;
+}
+
+
 // Función auxiliar: procesar respuesta de Gemini
 const processGeminiResponse = (text) => {
+    // text = cleanMarkdown(text);
+
     if (text.includes("[ERROR]")) {
-        const cleanText = text.replace(/\[ERROR\].*/i, "").trim();
+        const cleanText = text.replace(/^\[ERROR\]\s*/i, "").trim();
         return { isError: true, content: cleanText };
     }
     return { isError: false, content: text };
@@ -90,14 +118,10 @@ const generateGeminiResponse = async (prompt) => {
                 const chunkText = chunk.text();
                 fullText += chunkText;
 
-                if (fullText.length > 1000000) {
+                if (fullText.length > 10000000) {
                     console.warn("⚠️ Respuesta muy larga, truncando...");
                     break;
                 }
-            }
-
-            if (fullText.length < 50) {
-                throw new Error("Respuesta vacía o muy corta");
             }
 
             console.log(`✅ Generación exitosa: ${fullText.length} caracteres`);
@@ -107,7 +131,7 @@ const generateGeminiResponse = async (prompt) => {
             console.error(`❌ Error en intento ${attempt}:`, error.message);
 
             if (attempt === maxRetries) {
-                throw new Error(`Falló después de ${maxRetries} intentos: ${error.message}`);
+                throw new Error(`${error.message}`);
             }
 
             await new Promise(resolve => setTimeout(resolve, 2000));
@@ -116,7 +140,7 @@ const generateGeminiResponse = async (prompt) => {
 };
 
 // 🔥 PROCESAMIENTO EN BACKGROUND CON NOTIFICACIONES
-const processReportInBackground = async (reportId, fileContent, prompt, userId, title, full_name) => {
+const processReportInBackground = async (reportId, fileContent, prompt, userId, title, full_name,) => {
     const startTime = Date.now();
 
     try {
@@ -134,6 +158,8 @@ const processReportInBackground = async (reportId, fileContent, prompt, userId, 
 
         const fullPrompt = buildPrompt(fileContent, prompt, full_name, reportId, title);
         const geminiText = await generateGeminiResponse(fullPrompt);
+        console.log(geminiText);
+
         const processed = processGeminiResponse(geminiText);
 
         if (processed.isError) {
@@ -195,6 +221,120 @@ const processReportInBackground = async (reportId, fileContent, prompt, userId, 
         } catch (updateError) {
             console.error("Error actualizando estado fallido:", updateError);
         }
+    }
+};
+
+
+/**
+ * Procesamiento en background para versionado
+ */
+const processReportVersioningInBackground = async (
+    reportId,
+    newFileContent,
+    previousContent,
+    userPrompt,
+    userName,
+    userId,
+    title,
+    newFileId,
+    history_id
+) => {
+    const startTime = Date.now();
+
+    try {
+        console.log(`🔄 Versionando reporte ${reportId}...`);
+
+        const report = await Report.findByPk(reportId);
+        if (!report) {
+            console.error(`❌ Reporte ${reportId} no encontrado`);
+            return;
+        }
+
+        // Obtener número de versión
+        const lastVersion = await ReportHistory.findOne({
+            where: { report_id: reportId },
+            order: [['version', 'DESC']]
+        });
+
+        const newVersion = (lastVersion?.version || 0) + 1;
+
+        // Construir prompt de versionado
+        const versioningPrompt = buildVersioningPrompt(
+            newFileContent,
+            previousContent,
+            userPrompt,
+            userName,
+            reportId,
+            title
+        );
+
+        // Generar nueva versión con IA
+        const geminiText = await generateGeminiResponse(versioningPrompt);
+        console.log(versioningPrompt);
+
+        const processed = processGeminiResponse(geminiText);
+
+        if (processed.isError) {
+            await report.update({
+                status: "Completado"
+            });
+
+            await NotificationService.reportFailed(
+                userId,
+                reportId,
+                title,
+                processed.content || "Error al versionar reporte"
+            );
+            return;
+        }
+
+        // Crear nueva entrada en historial
+        await ReportHistory.create({
+            report_id: reportId,
+            version: newVersion,
+            content: processed.content,
+            prompt: userPrompt || null,
+            duration: Date.now() - startTime,
+            created_by: userId,
+        });
+
+        // // Actualizar reporte principal
+        const updates = {
+            content: processed.content,
+            status: "Completado",
+            duration: Date.now() - startTime,
+            updated_at: new Date()
+        };
+
+        if (newFileId) {
+            updates.file_id = newFileId;
+        }
+
+        await report.update(updates);
+
+        // Auditar cambios
+        await audit("Report", "VERSION", previousContent, processed.content, userId);
+
+        // Notificar éxito
+        await NotificationService.reportCompleted(userId, reportId, title);
+
+        console.log(`✅ Reporte ${reportId} versionado exitosamente (v${newVersion})`);
+
+    } catch (error) {
+        console.error(`❌ Error versionando reporte ${reportId}:`, error);
+
+        const report = await Report.findByPk(reportId);
+
+        await report.update({
+            status: "Completado"
+        });
+
+        await NotificationService.reportFailed(
+            userId,
+            reportId,
+            title,
+            error.message
+        );
     }
 };
 
@@ -345,7 +485,7 @@ router.get("/project/:project_id", auth, async (req, res) => {
     }
 });
 
-/**
+/** 
  * 3. Ver detalle de un reporte
  */
 router.get("/:report_id", auth, async (req, res) => {
@@ -376,112 +516,156 @@ router.get("/:report_id", auth, async (req, res) => {
 /**
  * 4. Editar reporte
  */
-router.put("/:report_id", auth, async (req, res) => {
+router.put("/:report_id", auth, upload.single("file"), async (req, res) => {
     try {
-        const { title, prompt, file_id } = req.body;
-        const report = await Report.findByPk(req.params.report_id);
+        const { report_id } = req.params;
+        const { title, prompt, history_id, project_id } = req.body;
 
+        // Buscar reporte
+        const report = await Report.findByPk(report_id);
         if (!report) {
             return res.status(404).json({ error: "Reporte no encontrado" });
         }
 
-        // Caso 1: Solo actualizar título/estado
-        if (!prompt && !file_id) {
-            await report.update({ title });
-            return res.json({ message: "Reporte actualizado", report });
+
+        // CASO 1: Solo actualizar título o estado (sin versionado)
+        const hasFile = req.file !== undefined;
+        const hasPrompt = prompt && prompt.trim() !== "";
+
+        if (!hasFile && !hasPrompt) {
+            // Solo actualizar campos simples
+            const updates = {};
+            if (title) updates.title = title;
+            updates.updated_at = new Date();
+
+            await report.update(updates);
+            await audit("Report", "UPDATE", { title }, report.toJSON(), req.user.user_id);
+
+            return res.json({
+                message: "Reporte actualizado exitosamente.",
+                status: 'Completado',
+                report
+            });
         }
 
-        // Caso 2: Regenerar
-        let fileContent;
-        if (file_id) {
-            const file = await UploadedFile.findByPk(file_id);
-            if (!file) return res.status(404).json({ error: "Archivo no encontrado" });
-            if (!isValidFormat(file.file_name)) {
-                return res.status(400).json({ error: "Formato no permitido" });
+        // CASO 2: Versionado con archivo y/o prompt
+        if (!history_id) {
+            return res.status(400).json({
+                error: "Se requiere history_id para versionar el reporte"
+            });
+        }
+
+        // Buscar versión previa
+        const previousHistory = await ReportHistory.findByPk(history_id);
+
+        if (!previousHistory || previousHistory.report_id !== parseInt(report_id)) {
+            return res.status(404).json({
+                error: "Versión previa no encontrada o no pertenece a este reporte"
+            });
+        }
+
+        const previousContent = previousHistory.content;
+
+        // Procesar archivo nuevo si existe
+        let newFileContent = "";
+        let newFile = null;
+
+        if (hasFile) {
+            // Validar formato
+            if (!isValidFormat(req.file.originalname)) {
+                // Eliminar archivo temporal
+                fs.unlinkSync(req.file.path);
+                return res.status(400).json({
+                    message: `Formato no permitido: ${req.file.originalname}`,
+                    allowedFormats: [".xml", ".json", ".html", ".csv", ".txt", ".log"]
+                });
             }
-            fileContent = fs.readFileSync(file.storage_path, "utf-8");
-            await report.update({ file_id });
-        } else {
-            const file = await UploadedFile.findByPk(report.file_id);
-            fileContent = fs.readFileSync(file.storage_path, "utf-8");
+
+            // Leer contenido del nuevo archivo
+            newFileContent = fs.readFileSync(req.file.path, "utf-8");
+
+            // ✨ COMPARAR SI EL ARCHIVO ES EL MISMO
+            // Obtener el archivo anterior de la versión previa
+            if (report.file_id) {
+                const previousFile = await UploadedFile.findByPk(report.file_id);
+
+                if (previousFile && fs.existsSync(previousFile.storage_path)) {
+                    const previousFileContent = fs.readFileSync(previousFile.storage_path, "utf-8");
+
+                    // Comparar contenido
+                    if (newFileContent === previousFileContent) {
+                        // Eliminar archivo temporal subido
+                        fs.unlinkSync(req.file.path);
+
+                        return res.status(400).json({
+                            error: "El archivo es el mismo. Use contexto adicional para esos ajustes.",
+                        });
+                    }
+                }
+            }
+
+            // Guardar nuevo archivo en BD
+            newFile = await UploadedFile.create({
+                project_id: project_id,
+                user_id: req.user.user_id,
+                file_name: req.file.originalname,
+                file_type: req.file.mimetype,
+                storage_path: req.file.path,
+            });
+
+            await audit("UploadedFile", "CREATE", null, newFile.toJSON(), req.user.user_id);
         }
 
-        // const reportTitle = title || report.title;
-        // await report.update({
-        //     status: "Pendiente",
-        //     title: reportTitle
-        // });
+        // Obtener información del usuario
+        const user = await User.findByPk(req.user.user_id);
+        const fullName = user?.full_name || "Usuario Desconocido";
 
-        // // Calcular nueva versión
-        // const lastHistory = await ReportHistory.findOne({
-        //     where: { report_id: report.report_id },
-        //     order: [["version", "DESC"]],
-        // });
-        // const newVersion = (lastHistory?.version || 0) + 1;
+        const reportUpdates = {
+            status: "En progreso",
+            updated_at: new Date()
+        };
 
-        // // Procesar en background
-        // setImmediate(async () => {
-        //     try {
-        //         await report.update({ status: "En progreso" });
-        //         await NotificationService.reportInProgress(
-        //             req.user.user_id,
-        //             report.report_id,
-        //             reportTitle
-        //         );
+        if (title) {
+            reportUpdates.title = title;
+        }
 
-        //         const fullPrompt = buildPrompt(fileContent, prompt, req.user.full_name);
-        //         const geminiText = await generateGeminiResponse(fullPrompt);
-        //         const processed = processGeminiResponse(geminiText);
+        // Actualizar estado a "En progreso"
+        await report.update(reportUpdates);
 
-        //         if (!processed.isError) {
-        //             await ReportHistory.create({
-        //                 report_id: report.report_id,
-        //                 version: newVersion,
-        //                 prompt: prompt || null,
-        //                 content: processed.content,
-        //                 created_by: req.user.user_id,
-        //             });
+        // Notificar inicio
+        await NotificationService.reportInProgress(
+            req.user.user_id,
+            report_id,
+            title || report.title
+        );
 
-        //             await report.update({
-        //                 content: processed.content,
-        //                 status: "Completado"
-        //             });
+        // Procesar versionado en background
+        setImmediate(() => {
+            processReportVersioningInBackground(
+                report_id,
+                newFileContent,
+                previousContent,
+                prompt,
+                fullName,
+                req.user.user_id,
+                title || report.title,
+                newFile?.file_id,
+                history_id
+            );
+        });
 
-        //             await NotificationService.reportCompleted(
-        //                 req.user.user_id,
-        //                 report.report_id,
-        //                 reportTitle
-        //             );
-        //         } else {
-        //             await report.update({ status: "Fallido" });
-        //             await NotificationService.reportFailed(
-        //                 req.user.user_id,
-        //                 report.report_id,
-        //                 reportTitle,
-        //                 processed.content
-        //             );
-        //         }
-        //     } catch (error) {
-        //         console.error("Error en regeneración:", error);
-        //         await report.update({ status: "Fallido" });
-        //         await NotificationService.reportFailed(
-        //             req.user.user_id,
-        //             report.report_id,
-        //             reportTitle,
-        //             error.message
-        //         );
-        //     }
-        // });
-
-        // res.status(202).json({
-        //     message: "Regeneración iniciada",
-        //     report: report.toJSON(),
-        //     pollUrl: `/reports/${report.report_id}`
-        // });
+        // Respuesta inmediata
+        res.status(202).json({
+            message: "El reporte se está versionando en segundo plano.",
+            status: "En progreso",
+        });
 
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: "Error al editar reporte" });
+        console.error("❌ Error en edición de reporte:", error);
+        res.status(500).json({
+            error: "Error al editar reporte",
+            details: error.message
+        });
     }
 });
 
@@ -492,7 +676,7 @@ router.get("/:report_id/history", auth, async (req, res) => {
     try {
         const history = await ReportHistory.findAll({
             where: { report_id: req.params.report_id },
-            order: [["version", "ASC"]],
+            order: [["version", "DESC"]],
             raw: true,
         });
 
