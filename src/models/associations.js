@@ -105,6 +105,10 @@ UploadedFile.hasMany(Report, {
     foreignKey: 'file_id',
     as: 'reports'
 });
+ReportHistory.belongsTo(UploadedFile, {
+    foreignKey: 'file_id',
+    as: 'file'
+});
 Report.belongsTo(UploadedFile, {
     foreignKey: 'file_id',
     as: 'file'

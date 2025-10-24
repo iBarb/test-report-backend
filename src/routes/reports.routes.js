@@ -140,7 +140,7 @@ const generateGeminiResponse = async (prompt) => {
 };
 
 // 🔥 PROCESAMIENTO EN BACKGROUND CON NOTIFICACIONES
-const processReportInBackground = async (reportId, fileContent, prompt, userId, title, full_name,) => {
+const processReportInBackground = async (reportId, fileContent, prompt, userId, title, full_name, file_id) => {
     const startTime = Date.now();
 
     try {
@@ -158,7 +158,6 @@ const processReportInBackground = async (reportId, fileContent, prompt, userId, 
 
         const fullPrompt = buildPrompt(fileContent, prompt, full_name, reportId, title);
         const geminiText = await generateGeminiResponse(fullPrompt);
-        console.log(geminiText);
 
         const processed = processGeminiResponse(geminiText);
 
@@ -181,6 +180,7 @@ const processReportInBackground = async (reportId, fileContent, prompt, userId, 
         // Guardar historial
         await ReportHistory.create({
             report_id: reportId,
+            file_id: file_id,
             version: 1,
             prompt: prompt || null,
             duration: Date.now() - startTime,
@@ -270,8 +270,6 @@ const processReportVersioningInBackground = async (
 
         // Generar nueva versión con IA
         const geminiText = await generateGeminiResponse(versioningPrompt);
-        console.log(versioningPrompt);
-
         const processed = processGeminiResponse(geminiText);
 
         if (processed.isError) {
@@ -291,6 +289,7 @@ const processReportVersioningInBackground = async (
         // Crear nueva entrada en historial
         await ReportHistory.create({
             report_id: reportId,
+            file_id: newFileId,
             version: newVersion,
             content: processed.content,
             prompt: userPrompt || null,
@@ -398,7 +397,8 @@ router.post("/upload/:project_id", auth, upload.single("file"), async (req, res)
                 prompt,
                 req.user.user_id,
                 reportTitle,
-                fullName
+                fullName,
+                file.file_id
             );
         });
 
@@ -586,8 +586,8 @@ router.put("/:report_id", auth, upload.single("file"), async (req, res) => {
 
             // ✨ COMPARAR SI EL ARCHIVO ES EL MISMO
             // Obtener el archivo anterior de la versión previa
-            if (report.file_id) {
-                const previousFile = await UploadedFile.findByPk(report.file_id);
+            if (previousHistory.file_id) {
+                const previousFile = await UploadedFile.findByPk(previousHistory.file_id);
 
                 if (previousFile && fs.existsSync(previousFile.storage_path)) {
                     const previousFileContent = fs.readFileSync(previousFile.storage_path, "utf-8");
@@ -650,7 +650,7 @@ router.put("/:report_id", auth, upload.single("file"), async (req, res) => {
                 req.user.user_id,
                 title || report.title,
                 newFile?.file_id,
-                history_id
+                history_id,
             );
         });
 

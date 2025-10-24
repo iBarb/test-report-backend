@@ -4,6 +4,7 @@ const sequelize = require("../config/db");
 const ReportHistory = sequelize.define("ReportHistory", {
     history_id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
     report_id: { type: DataTypes.INTEGER, allowNull: false },
+    file_id: { type: DataTypes.INTEGER, allowNull: false },
     version: { type: DataTypes.INTEGER },
     content: { type: DataTypes.TEXT },
     prompt: { type: DataTypes.TEXT },

@@ -102,12 +102,15 @@ const buildVersioningPrompt = (
     ARCHIVO NUEVO (newFileContent):
     ${newFileContent}
 
+    **Validaciones si fallta en alguno no necesitas continuar con lo demas.**
+
     PASO 1 - VALIDACIÓN DE MÓDULO:
     Identifica el feature/módulo en AMBOS archivos:
     - Archivo ANTERIOR: busca en "product", "system", "title", testCaseId, o contexto general
     - Archivo NUEVO: busca en títulos de tests (ej: ["Login", "debe..."]), suite names, o descripciones
 
     Usa CONTEXTO SEMÁNTICO: "Sistema de Autenticación" + tests "Login" = MISMO MÓDULO
+    Si son del mismo módulo, continúa al PASO 2 - VERSIONADO
 
     Si NO COINCIDEN (features distintos):
     CRÍTICO: NO expliques tu análisis. Retorna SOLO estas líneas (sin texto adicional):
@@ -146,6 +149,22 @@ const buildVersioningPrompt = (
     - Cambios en duración de ejecución
 
     ${prompt ? `CONTEXTO ADICIONAL: "${prompt}"` : ""}
+
+    ESTRUCTURA TEL (Test Execution Log):
+    - Introducción: maximo 50 palabras sobre el contexto general del testing
+    - testCaseId, dateTime, logEntry, status (Passed|Failed|Blocked|Skipped)
+    - impact: solo si status=Failed, describir consecuencia
+
+    ESTRUCTURA TIR (Test Incident Report - solo para casos Failed):
+    - Introducción: maximo 50 palabras sobre los defectos encontrados
+    - incidentNumber: INC-### único
+    - details en generalInformation: mínimo 50 palabras
+    - details en incidentDetails: mínimo 50 palabras
+    - status: Open|Approved for Resolution|Fixed|Retested and Confirmed|Closed|Rejected|Withdrawn
+    - observedDuring: Walk-through|Peer Review|Inspection|Code & Build|Unit Testing|System Testing|System Integration Testing|User Acceptance Testing|Performance Testing|Security Testing|Other
+    - severity: Alto|Medio|Bajo
+    - priority: 1|2|3|4
+    - risk: evaluación detallada, mínimo 50 palabras
 
     IMPORTANTE [CONTEO]:
     - totalExecutions: total de tests ejecutados
