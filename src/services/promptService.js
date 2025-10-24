@@ -34,12 +34,12 @@ const buildPrompt = (fileContent, userPrompt = "", UserName = "", reportId, titl
     4. Idioma de salida: ESPAÑOL
 
     ESTRUCTURA TEL (Test Execution Log):
-    - Introducción: mínimo 100 palabras sobre el contexto general del testing
+    - Introducción: maximo 50 palabras sobre el contexto general del testing
     - testCaseId, dateTime, logEntry, status (Passed|Failed|Blocked|Skipped)
     - impact: solo si status=Failed, describir consecuencia
 
     ESTRUCTURA TIR (Test Incident Report - solo para casos Failed):
-    - Introducción: mínimo 100 palabras sobre los defectos encontrados
+    - Introducción: maximo 50 palabras sobre los defectos encontrados
     - incidentNumber: INC-### único
     - details en generalInformation: mínimo 50 palabras
     - details en incidentDetails: mínimo 50 palabras
@@ -121,7 +121,7 @@ const buildVersioningPrompt = (
     2. Agregar nueva entrada en documentRevisionHistory con:
     - date: fecha actual (DD/MM/YYYY)
     - documentVersion: nueva versión
-    - revisionDescription: resumen de cambios encontrados (mínimo 50 palabras)
+    - revisionDescription: resumen de cambios encontrados (maximo 20 palabras)
     - author: "${user}"
     3. Mantener TODO el historial previo de revisiones
     4. Actualizar testExecutionLog con:
@@ -169,7 +169,7 @@ const buildVersioningPrompt = (
                 "author":"${user}"
             }
         ],
-        "introduction": "Actualizar introducción mencionando esta nueva versión y cambios principales (mínimo 100 palabras)",
+        "introduction": "Actualizar introducción mencionando esta nueva versión y cambios principales (maximo 50 palabras)",
         "testExecutionLog": [
             {...ejecuciones previas relevantes...},
             {...nuevas ejecuciones...}
